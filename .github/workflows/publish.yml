@@ -1,0 +1,53 @@
+# Builds und publishen das TLS-Check-Image bei jedem Push an main.
+#
+# Benötigt Repo-Settings:  Settings → Actions → Workflow permissions
+#                          → "Read and write" (für ghcr-Push)
+# Image landet auf:        ghcr.io/<github_user>/tlscheck:latest (und :<tag>)
+#
+# Pull:  docker pull ghcr.io/<github_user>/tlscheck:latest
+#        (einmal: docker login ghcr.io mit GitHub-PAT (Scope: read:packages))
+
+name: Build & Publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_branch('main')}}
+            type=semver,pattern={{version}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

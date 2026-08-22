@@ -1,0 +1,17 @@
+# TLS-Check im Docker-Compose (LAN)
+#
+#   docker compose up -d        → startet persistent (Restart: unless-stopped)
+#   docker compose logs -f      → Logs
+#   docker compose down         → stoppt
+#
+# Danach erreichbar unter http://<lan-ip>:8765
+
+services:
+  tlscheck:
+    image: ghcr.io/pendraga/sslcheck:latest
+    container_name: tlscheck
+    ports:
+      - "8765:8765"
+    restart: unless-stopped
+    # Netzwerk-Zugriff braucht der Container (DNS + 443 + 80 + UDP/443 für
+    # CRL/OCSP/HTTP3). Default bridge-Netzwerk reicht.
