@@ -163,7 +163,9 @@ h2{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09e
 .kv dd{margin:0;word-break:break-word;font-family:var(--mono);font-size:13px}
 .chainbox{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
   padding:12px 14px;margin-bottom:8px;transition:background-color .25s,border-color .25s}
-.chainbox.leaf{border-left:3px solid var(--ok)}
+.chainbox.srv{border-left:3px solid var(--ok)}
+.chainbox.ts{border-left:3px solid var(--accent)}
+.chainbox.miss{border-left:3px solid var(--bad)}
 .chainbox .c-head{font-weight:600;margin-bottom:2px;font-size:13.5px}
 .chainbox .c-sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:999px;
@@ -330,31 +332,29 @@ function render(r){
     <dt>OCSP-URL</dt><dd class="dim">${esc(c.ocsp_url||"–")}</dd>
   </dl></div>`;
 
-  // Kette (geordnet leaf → root, jedes Glied mit Quellen-Badge)
+  // Kette (geordnet leaf → root, Karten mit Pro-Zertifikat-Quellen-Badge)
   h+=`<div class="card"><h2>Zertifikatskette (Endzertifikat → Root)</h2>`;
   const fc=ch.full_chain||[];
+  const srcBadge=s=>s==="server"
+      ?`<span class="tag ok">Vom Server gesendet</span>`
+      :s==="truststore"
+        ?`<span class="tag i">Aus Truststore (nicht vom Server)</span>`
+        :`<span class="tag p">Fehlt (weder Server noch lokal)</span>`;
   if(fc.length){
-    h+=`<table><tr><th>#</th><th>Zertifikat</th><th>Quelle</th><th>Detail</th></tr>`;
     fc.forEach((p,i)=>{
-      const badge=p.source==="server"
-        ?`<span class="tag ok">Vom Server gesendet</span>`
-        :(p.source==="truststore"
-          ?`<span class="tag i">Aus Truststore (nicht vom Server)</span>`
-          :`<span class="tag p">Fehlt (weder Server noch lokal)</span>`);
-      const role=i===0?"Endzertifikat":(p.self_signed?"Wurzel":"Zwischenzertifikat");
-      h+=`<tr>
-        <td class="dim">${i}</td>
-        <td class="name">${i===0?`<b>${esc(p.subject)}</b>`:esc(p.subject)}${p.self_signed?` <span class="dim">(self-signed)</span>`:""}</td>
-        <td>${badge}</td>
-        <td class="dim mono">${role}${p.serial?` · Serial ${esc(p.serial)}`:""}${p.valid_to?` · gültig bis ${esc(p.valid_to)}`:""}</td>
-      </tr>`;
+      const cls=p.source==="server"?"srv":p.source==="truststore"?"ts":"miss";
+      const role=i===0?"Endzertifikat":(p.self_signed?"Root":"Zwischenzertifikat");
+      h+=`<div class="chainbox ${cls}">
+        <div class="c-head">${role} ${srcBadge(p.source)}${p.self_signed?" <span class='dim'>(self-signed)</span>":""}</div>
+        <div class="c-sub">${esc(p.subject)}</div>
+        <div class="c-sub">${p.issuer?`Issuer: ${esc(p.issuer)} · `:""}${p.serial?`Serial ${esc(p.serial)} · `:""}${p.valid_to?`gültig bis ${esc(p.valid_to)}`:""}</div>
+      </div>`;
     });
-    h+=`</table>`;
   } else {
     (ch.presented||[]).forEach((p,i)=>{
-      const tag=i===0?"Endzertifikat":i===1?"Zwischenzertifikat":(i===2?"Wurzel":"Glied "+i);
-      h+=`<div class="chainbox ${i===0?"leaf":""}">
-        <div class="c-head">${tag} ${p.self_signed?"<span class='dim'>(self-signed)</span>":""}</div>
+      const tag=i===0?"Endzertifikat":i===1?"Zwischenzertifikat":(i===2?"Root":"Glied "+i);
+      h+=`<div class="chainbox srv">
+        <div class="c-head">${tag} ${srcBadge("server")}${p.self_signed?" <span class='dim'>(self-signed)</span>":""}</div>
         <div class="c-sub">${esc(p.subject)}</div>
         <div class="c-sub">Issuer: ${esc(p.issuer)} · Serial ${esc(p.serial)} · gültig bis ${esc(p.valid_to)}</div>
       </div>`;
