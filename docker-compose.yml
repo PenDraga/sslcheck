@@ -1,17 +1,30 @@
-# TLS-Check im Docker-Compose (LAN)
+# TLS-Check im Docker-Compose (LAN) via Traefik
 #
 #   docker compose up -d        → startet persistent (Restart: unless-stopped)
 #   docker compose logs -f      → Logs
 #   docker compose down         → stoppt
 #
-# Danach erreichbar unter http://<lan-ip>:8765
+# Erreichbar über Traefik: https://<APP_DOMAIN>
+# (APP_DOMAIN = der Hostname/IP, unter der Traefik die UI ausliefern soll)
 
 services:
   tlscheck:
     image: ghcr.io/pendraga/sslcheck:latest
     container_name: tlscheck
-    ports:
-      - "8765:8765"
     restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik"
+      traefik.http.routers.tlscheck.rule: "Host(`${APP_DOMAIN}`)"
+      traefik.http.routers.tlscheck.entrypoints: "https"
+      traefik.http.routers.tlscheck.tls: "true"
+      traefik.http.routers.tlscheck.tls.certresolver: "letsencrypt"
+      traefik.http.services.tlscheck.loadbalancer.server.port: "8765"
     # Netzwerk-Zugriff braucht der Container (DNS + 443 + 80 + UDP/443 für
-    # CRL/OCSP/HTTP3). Default bridge-Netzwerk reicht.
+    # CRL/OCSP/HTTP3). Das externe Traefik-Netzwerk gibt Internetzugang.
+
+networks:
+  traefik:
+    external: true
