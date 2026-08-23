@@ -65,89 +65,167 @@ INDEX_HTML = r"""<!doctype html>
 <title>TLS- &amp; Zertifikats-Check</title>
 <style>
 :root{
-  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2b3444;
-  --txt:#e6edf3; --dim:#8b98a9; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
-  --accent:#4ea1ff; --radius:12px; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+  --bg:#0b0f17; --panel:#101624; --panel2:#171f31; --line:#243047;
+  --txt:#e9eef7; --dim:#8f9db3;
+  --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+  --ok-soft:rgba(52,211,153,.10); --warn-soft:rgba(251,191,36,.12); --bad-soft:rgba(248,113,113,.12);
+  --accent:#4f8cff; --accent2:#7c5cff;
+  --radius:14px; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 30px rgba(0,0,0,.22);
+  --grad1:rgba(79,140,255,.10);
+}
+html[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f3f5fa; --panel:#ffffff; --panel2:#eef2f8; --line:#dce3ef;
+  --txt:#1b2436; --dim:#5c6a82;
+  --ok:#0f9d58; --warn:#b45309; --bad:#dc2626;
+  --ok-soft:rgba(15,157,88,.10); --warn-soft:rgba(180,83,9,.12); --bad-soft:rgba(220,38,38,.10);
+  --accent:#2563eb; --accent2:#7c3aed;
+  --shadow:0 1px 2px rgba(16,24,40,.05),0 10px 30px rgba(16,24,40,.07);
+  --grad1:rgba(37,99,235,.08);
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);
-  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  padding:24px 16px 60px}
+body{margin:0;min-height:100vh;color:var(--txt);
+  background:radial-gradient(1100px 480px at 85% -8%,var(--grad1),transparent 60%),var(--bg);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding:0 16px 70px;transition:background-color .25s ease,color .25s ease}
+.topbar{position:sticky;top:0;z-index:20;margin:0 -16px 22px;
+  background:var(--bg);background:color-mix(in srgb,var(--bg) 82%,transparent);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);transition:background-color .25s ease,border-color .25s}
+.topbar-in{max-width:960px;margin:0 auto;padding:12px 2px;display:flex;
+  align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand svg{flex:0 0 auto}
+h1{font-size:17px;font-weight:700;margin:0;letter-spacing:-.01em}
+.sub{color:var(--dim);font-size:12px;margin-top:1px}
+#themebtn{width:38px;height:38px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--dim);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;transition:color .15s,border-color .15s,background-color .25s}
+#themebtn:hover{color:var(--txt);border-color:var(--accent)}
+#themebtn svg{width:19px;height:19px}
+.icon-moon{display:none}
+html[data-theme="dark"] .icon-sun{display:block}
+html[data-theme="light"] .icon-moon{display:block}
 .wrap{max-width:960px;margin:0 auto}
-h1{font-size:20px;margin:0 0 2px}
-.sub{color:var(--dim);font-size:13px;margin-bottom:20px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  padding:18px;margin-bottom:16px}
-label{color:var(--dim);font-size:12px;display:block;margin-bottom:6px;letter-spacing:.04em;text-transform:uppercase}
-.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
-.field{flex:1;min-width:220px}
+  padding:20px;margin-bottom:16px;box-shadow:var(--shadow);
+  transition:background-color .25s ease,border-color .25s}
+label{color:var(--dim);font-size:11.5px;font-weight:600;display:block;margin-bottom:7px;
+  letter-spacing:.05em;text-transform:uppercase}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.field{flex:1;min-width:230px}
 input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);
-  color:var(--txt);border-radius:8px;padding:11px 12px;font-size:15px;font-family:var(--mono)}
-input[type=text]:focus{outline:none;border-color:var(--accent)}
+  color:var(--txt);border-radius:10px;padding:12px 14px;font-size:14.5px;font-family:var(--mono);
+  transition:border-color .15s,box-shadow .15s,background-color .25s}
+input[type=text]::placeholder{color:var(--dim);opacity:.7}
+input[type=text]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,140,255,.22)}
 .chk{display:flex;align-items:center;gap:8px;background:var(--panel2);
-  border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;white-space:nowrap}
+  border:1px solid var(--line);border-radius:10px;padding:10px 13px;cursor:pointer;white-space:nowrap;
+  transition:background-color .25s,border-color .25s}
+.chk:hover{border-color:var(--accent)}
 .chk input{width:16px;height:16px;accent-color:var(--accent)}
-.chk span{font-size:13px}
-button{background:var(--accent);color:#fff;border:none;border-radius:8px;
-  padding:11px 22px;font-size:15px;font-weight:600;cursor:pointer}
-button:disabled{opacity:.5;cursor:not-allowed}
-button:hover:not(:disabled){filter:brightness(1.1)}
+.chk span{font-size:13px;color:var(--txt)}
+#go{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;
+  border-radius:10px;padding:12px 26px;font-size:14.5px;font-weight:650;cursor:pointer;letter-spacing:.01em;
+  box-shadow:0 3px 12px rgba(79,140,255,.30);transition:transform .12s,filter .12s,box-shadow .12s}
+#go:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.07);box-shadow:0 5px 16px rgba(79,140,255,.40)}
+#go:active:not(:disabled){transform:translateY(0)}
+#go:disabled{opacity:.55;cursor:not-allowed}
 .gradebar{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-.badge{font-size:40px;font-weight:800;width:74px;height:74px;border-radius:14px;
-  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-.grade-F{background:#f85149;color:#fff}
-.grade-C{background:#d29922;color:#000}
-.grade-B,.grade-A-,.grade-A{background:#3fb950;color:#000}
-.grade-note{font-size:15px;color:var(--txt);max-width:560px}
-.proto{color:var(--dim);font-size:13px;margin-top:6px}
-.list{list-style:none;padding:0;margin:8px 0 0}
-.list li{padding:7px 0;border-bottom:1px solid var(--line);display:flex;gap:10px}
+.badge{font-size:32px;font-weight:800;width:68px;height:68px;border-radius:18px;letter-spacing:-.02em;
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto;box-shadow:0 5px 16px rgba(0,0,0,.22)}
+.grade-F{background:linear-gradient(135deg,#f87171,#ef4444);color:#fff}
+.grade-C{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#2b1d00}
+.grade-B,.grade-A-,.grade-A{background:linear-gradient(135deg,#34d399,#10b981);color:#04261b}
+.grade-note{font-size:14.5px;font-weight:500;max-width:560px}
+.proto{color:var(--dim);font-size:12.5px;margin-top:6px}
+.list{list-style:none;padding:0;margin:10px 0 0}
+.list li{padding:9px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
 .list li:last-child{border-bottom:none}
-.tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;flex:0 0 auto;
-  text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
-.tag.p{background:#f85149;color:#fff}
-.tag.w{background:#d29922;color:#000}
-.tag.i{background:#2b3444;color:var(--dim)}
+.tag{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:999px;flex:0 0 auto;
+  text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.tag.p{background:var(--bad-soft);color:var(--bad)}
+.tag.w{background:var(--warn-soft);color:var(--warn)}
+.tag.i{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
 .okbox{color:var(--ok);font-weight:600}
-h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);
-  margin:0 0 12px}
-.kv{display:grid;grid-template-columns:190px 1fr;gap:4px 14px;font-size:14px}
-.kv dt{color:var(--dim)}
+h2{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
+  margin:0 0 14px}
+.kv{display:grid;grid-template-columns:200px 1fr;gap:10px 16px;font-size:14px}
+.kv dt{color:var(--dim);font-size:12.5px;padding-top:2px}
 .kv dd{margin:0;word-break:break-word;font-family:var(--mono);font-size:13px}
-.chainbox{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
-  padding:12px;margin-bottom:8px}
-.chainbox .c-head{font-weight:600;margin-bottom:2px}
+.chainbox{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px;margin-bottom:8px;transition:background-color .25s,border-color .25s}
+.chainbox.leaf{border-left:3px solid var(--ok)}
+.chainbox .c-head{font-weight:600;margin-bottom:2px;font-size:13.5px}
 .chainbox .c-sub{color:var(--dim);font-size:12px;font-family:var(--mono)}
-.chip{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;
-  font-family:var(--mono);margin:0 6px 6px 0;border:1px solid var(--line)}
-.chip.on{border-color:var(--ok);color:var(--ok)}
-.chip.off{color:var(--dim);opacity:.6}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:999px;
+  font-size:12.5px;font-family:var(--mono);margin:0 8px 8px 0;border:1px solid var(--line);
+  background:var(--panel2);color:var(--dim);transition:background-color .25s,border-color .25s}
+.chip.on{border-color:transparent;color:var(--ok);background:var(--ok-soft);font-weight:600}
+.chip.off{opacity:.55}
 table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+th,td{text-align:left;padding:9px 8px;vertical-align:top}
+th{color:var(--dim);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+  border-bottom:1px solid var(--line)}
+tr+tr td{border-top:1px solid var(--line)}
 td.name{font-family:var(--mono);word-break:break-all}
 .cat-S{color:var(--ok);font-weight:600}
 .cat-W{color:var(--warn);font-weight:600}
 .cat-X{color:var(--bad);font-weight:600}
 .dim{color:var(--dim)}
-.errbox{background:#3a1d1d;border:1px solid #f85149;color:#ff8a80;
-  border-radius:8px;padding:12px;font-family:var(--mono);font-size:13px;white-space:pre-wrap}
+.errbox{background:var(--bad-soft);border:1px solid var(--bad);color:var(--txt);
+  border-radius:10px;padding:12px;font-family:var(--mono);font-size:13px;white-space:pre-wrap}
 .mono{font-family:var(--mono);font-size:12px}
-.linkbtn{background:none;border:none;color:var(--accent);cursor:pointer;
-  font-size:13px;padding:0;text-decoration:underline}
-.spin{display:inline-block;width:14px;height:14px;border:2px solid #fff3;
-  border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+#raw{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px;
+  max-height:420px;overflow:auto}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(140,150,170,.3);
+  border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite;
+  vertical-align:-2px;margin-right:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
+.foot{color:var(--dim);font-size:12px;text-align:center;margin-top:8px;opacity:.85}
 .hide{display:none}
-@media(max-width:600px){.kv{grid-template-columns:1fr}.kv dt{margin-top:6px}
-  .gradebar{gap:12px}.badge{font-size:32px;width:58px;height:58px}}
+@media(max-width:600px){.kv{grid-template-columns:1fr}.kv dt{margin-top:4px}
+  .gradebar{gap:12px}.badge{font-size:26px;width:56px;height:56px;border-radius:14px}
+  .row{align-items:stretch}.chk{justify-content:center}}
 </style>
 </head>
 <body>
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+        <path d="M17 3 L28.5 7.5 v8.2 c0 6.9-4.9 12.4-11.5 14.8 C10.4 28.1 5.5 22.6 5.5 15.7 V7.5 Z"
+              fill="url(#tg)" stroke="var(--line)" stroke-width="1"/>
+        <path d="M12.5 17.2 l3.2 3.2 L22 14" stroke="#fff" stroke-width="2.4"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="tg" x1="5.5" y1="3" x2="28.5" y2="30.5"
+                          gradientUnits="userSpaceOnUse">
+            <stop stop-color="var(--accent)"/><stop offset="1" stop-color="var(--accent2)"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div>
+        <h1>TLS- &amp; Zertifikats-Check</h1>
+        <div class="sub">Kette, Protokolle, Webserver, Revocation – im LAN</div>
+      </div>
+    </div>
+    <button id="themebtn" title="Thema umschalten" aria-label="Dunkel-/Hellmodus umschalten">
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.2 5.2l1.7 1.7M17.1 17.1l1.7 1.7M18.8 5.2l-1.7 1.7M6.9 17.1l-1.7 1.7"/>
+      </svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/>
+      </svg>
+    </button>
+  </div>
+</div>
 <div class="wrap">
-  <h1>TLS- &amp; Zertifikats-Check</h1>
-  <div class="sub">Gültigkeit, Zertifikatskette (Server vs. Truststore/AIA), TLS-Versionen &amp; Cipher-Suiten</div>
-
   <div class="card">
     <div class="row">
       <div class="field">
@@ -156,20 +234,32 @@ td.name{font-family:var(--mono);word-break:break-all}
       </div>
       <label class="chk"><input type="checkbox" id="ocsp"><span>OCSP prüfen</span></label>
       <label class="chk"><input type="checkbox" id="noaia"><span>AIA überspringen</span></label>
-      <label class="chk" title="Überspringt CRL, OCSP-Stapling, Session-Resume & HTTP/3 (Schnellcheck)"><input type="checkbox" id="fast"><span>– schnell</span></label>
+      <label class="chk" title="Überspringt CRL, OCSP-Stapling, Session-Resume & HTTP/3 (Schnellcheck)"><input type="checkbox" id="fast"><span>Schnellcheck</span></label>
       <button id="go">Prüfen</button>
     </div>
   </div>
 
   <div id="status"></div>
   <div id="result"></div>
-  <div id="rawwrap" class="card hide" style="margin-top:16px">
+  <div id="rawwrap" class="card hide">
     <h2>Roh-JSON</h2>
     <pre id="raw" class="mono" style="white-space:pre-wrap;margin:0"></pre>
   </div>
+  <div class="foot">Läuft lokal im LAN · Datenquelle: <span class="mono">tlscheck.py --json</span></div>
 </div>
 
 <script>
+// --- Thema (Dunkel/Hell), persistiert in localStorage ----------------------
+const rootEl=document.documentElement;
+function applyTheme(t){rootEl.setAttribute("data-theme",t);try{localStorage.setItem("tlscheck-theme",t)}catch(e){}}
+(function initTheme(){
+  let t=null;try{t=localStorage.getItem("tlscheck-theme")}catch(e){}
+  if(!t)t=window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+  applyTheme(t);
+})();
+document.getElementById("themebtn").addEventListener("click",()=>{
+  applyTheme(rootEl.getAttribute("data-theme")==="light"?"dark":"light");
+});
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const gradeClass=g=>["F","C","B","A-","A"].includes(g)?`grade-${g}`:"grade-B";
@@ -220,7 +310,7 @@ function render(r){
   h+=`<div class="card"><h2>Zertifikatskette (vom Server geliefert)</h2>`;
   (ch.presented||[]).forEach((p,i)=>{
     const tag=i===0?"Endzertifikat":i===1?"Zwischenzertifikat":(i===2?"Wurzel":"Glied "+i);
-    h+=`<div class="chainbox">
+    h+=`<div class="chainbox ${i===0?"leaf":""}">
       <div class="c-head">${tag} ${p.self_signed?"<span class='dim'>(self-signed)</span>":""}</div>
       <div class="c-sub">${esc(p.subject)}</div>
       <div class="c-sub">Issuer: ${esc(p.issuer)} · Serial ${esc(p.serial)} · gültig bis ${esc(p.valid_to)}</div>
@@ -275,7 +365,7 @@ function render(r){
     const ips=(d.ipv4||[]).concat(d.ipv6||[]);
     h+=`<div class="card"><h2>DNS / Auflösung</h2>`;
     if(!d.ok){
-      h+=`<div class="errbox" style="background:#3a1d1d">Auflösung fehlgeschlagen: ${esc(d.error||"")}</div>`;
+      h+=`<div class="errbox">Auflösung fehlgeschlagen: ${esc(d.error||"")}</div>`;
     } else {
       h+=`<dl class="kv">
         <dt>Adressen</dt><dd>${ips.length?ips.map(x=>esc(x)).join(" · "):"–"}${ips.length>1?` <span class="dim">(${ips.length} Adressen – Round-Robin/CDN?)</span>`:""}</dd>
@@ -311,7 +401,7 @@ function render(r){
     const o=r.ocsp;
     h+=`<div class="card"><h2>OCSP</h2>
       <dl class="kv">
-      <dt>Erreichbar</dt><dd>${o.available?"✓":"✗"}</dd>
+      <dt>Erreichbar</dt><dd>${o.available?'<span class="cat-S">✓</span>':'<span class="cat-W">✗</span>'} ${o.url?`<span class="dim mono">${esc(o.url)}</span>`:""}</dd>
       <dt>Status</dt><dd class="${o.ok?"cat-S":"cat-W"}">${esc(o.certificate_status||o.response_status||"unbekannt")}</dd>
       ${o.available?`<dt>This Update</dt><dd>${esc(o.this_update||"")}</dd>
       <dt>Next Update</dt><dd>${esc(o.next_update||"")}</dd>`:""}
