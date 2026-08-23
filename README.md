@@ -73,6 +73,48 @@ python3 tlscheck_web.py --port 8765 &
    docker compose up -d            # docker-compose.yml: Port 8765 + Restart
    ```
 
+## Sicherheit / Audit
+
+Stand: 2026-08-23 (Security-Audit, alle Fixes drin):
+
+- **Keine Shell-Aufrufe**: alle `openssl`-Aufrufe per Argument-Liste
+  (`subprocess.run([...])`, nie `shell=True`) – kein Injection-Pfad.
+- **Host-Validierung (Web)**: `HOST_RE` (Hostname/IP `:Port`),
+  Whitespace-Raum + 256-Char-Limit; ungültig → HTTP 400.
+- **SSRF-Schutz (feindliche Server)**: Redirect-Following folgt
+  **nicht** auf Loopback/Link-Local (127.x, ::1, 169.254.x – inkl.
+  Cloud-Metadata) und **nicht** auf Downgrades HTTPS → HTTP.
+- **URL-Schema-Check (feindliche Zertifikate)**: AIA- und
+  CRL-URLs aus Zertifikaten werden nur abgerufen, wenn
+  `http://`/`https://` – `file://`, `gopher://`, `ldap://` etc.
+  werden abgelehnt (blockt lokale Dateileaks).
+- **Größen-Deckel**: CRL-Downloads max. 20 MB
+  (`--crl-max-mb`), AIA-Antworten max. 1 MB – Memory-Exhaustion
+  durch feindliche Endpunkte begrenzt.
+- **DoS-Schutz (Web)**: max. 5 parallele Checks
+  (`threading.Semaphore`), darüber → HTTP 503 + `Retry-After`.
+- **Temp-Dateien**: `NamedTemporaryFile(delete=False)` +
+  `finally: os.unlink()` – nichts bleibt in `/tmp`.
+- **Keine Secrets**: keine API-Keys/Passwörter im Code oder im
+  Docker-Image; Subprozesse bekommen `input=""` (keine stdin).
+- **XSS (Frontend)**: alle Zertifikat-/Server-Daten werden via
+  `esc()` HTML-escapet bevor sie in `innerHTML` wandern;
+  Raw-JSON via `textContent` (kein HTML-Parse).
+- **Docker**: non-root-User (`tlscheck`, UID 10001),
+  `python:3.11-slim` + `openssl` + `ca-certificates`,
+  keine Secrets im Image, HEALTHCHECK.
+- **CI (GitHub Actions)**: `actions/checkout@v4` (pinned),
+  `permissions: contents:read, packages:write` (minimal),
+  `GITHUB_TOKEN` nur für GHCR-Login.
+
+**Inhärente Einschränkung (Design)**: Das Tool prüft *auf Wunsch*
+beliebige Hosts – wer den Web-Port (8765) im LAN erreicht, kann
+auch interne Hosts:Ports checken lassen (Port-Scan-Ersatz).
+Gegenmassnahme: Port 8765 nur im vertrauenswürdigen
+LAN binden (Docker-Compose bindet standardmäßig an alle
+Schnittstellen – für multi-NIC-Hosts `127.0.0.1:8765:8765`
+verwenden).
+
 ## Hinweise
 
 - Der lokale Truststore (Default: `/etc/ssl/certs/ca-certificates.crt`, 121 CAs)

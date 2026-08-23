@@ -17,6 +17,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -24,6 +25,10 @@ from urllib.parse import urlparse, parse_qs, unquote
 HERE = Path(__file__).resolve().parent
 CHECKER = HERE / "tlscheck.py"
 PY = sys.executable or "python3"
+
+# Max. parallele Checks (Subprocess-Budget) – davor: 503.
+MAX_CONCURRENT_CHECKS = 5
+_check_slots = threading.Semaphore(MAX_CONCURRENT_CHECKS)
 
 # Host muss wie ein Hostname / IP (optional mit :Port) aussehen.
 HOST_RE = re.compile(
@@ -149,6 +154,7 @@ input[type=text]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 
 .tag.p{background:var(--bad-soft);color:var(--bad)}
 .tag.w{background:var(--warn-soft);color:var(--warn)}
 .tag.i{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
 .okbox{color:var(--ok);font-weight:600}
 h2{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--dim);
   margin:0 0 14px}
@@ -324,16 +330,36 @@ function render(r){
     <dt>OCSP-URL</dt><dd class="dim">${esc(c.ocsp_url||"–")}</dd>
   </dl></div>`;
 
-  // Kette
-  h+=`<div class="card"><h2>Zertifikatskette (vom Server geliefert)</h2>`;
-  (ch.presented||[]).forEach((p,i)=>{
-    const tag=i===0?"Endzertifikat":i===1?"Zwischenzertifikat":(i===2?"Wurzel":"Glied "+i);
-    h+=`<div class="chainbox ${i===0?"leaf":""}">
-      <div class="c-head">${tag} ${p.self_signed?"<span class='dim'>(self-signed)</span>":""}</div>
-      <div class="c-sub">${esc(p.subject)}</div>
-      <div class="c-sub">Issuer: ${esc(p.issuer)} · Serial ${esc(p.serial)} · gültig bis ${esc(p.valid_to)}</div>
-    </div>`;
-  });
+  // Kette (geordnet leaf → root, jedes Glied mit Quellen-Badge)
+  h+=`<div class="card"><h2>Zertifikatskette (Endzertifikat → Root)</h2>`;
+  const fc=ch.full_chain||[];
+  if(fc.length){
+    h+=`<table><tr><th>#</th><th>Zertifikat</th><th>Quelle</th><th>Detail</th></tr>`;
+    fc.forEach((p,i)=>{
+      const badge=p.source==="server"
+        ?`<span class="tag ok">Vom Server gesendet</span>`
+        :(p.source==="truststore"
+          ?`<span class="tag i">Aus Truststore (nicht vom Server)</span>`
+          :`<span class="tag p">Fehlt (weder Server noch lokal)</span>`);
+      const role=i===0?"Endzertifikat":(p.self_signed?"Wurzel":"Zwischenzertifikat");
+      h+=`<tr>
+        <td class="dim">${i}</td>
+        <td class="name">${i===0?`<b>${esc(p.subject)}</b>`:esc(p.subject)}${p.self_signed?` <span class="dim">(self-signed)</span>`:""}</td>
+        <td>${badge}</td>
+        <td class="dim mono">${role}${p.serial?` · Serial ${esc(p.serial)}`:""}${p.valid_to?` · gültig bis ${esc(p.valid_to)}`:""}</td>
+      </tr>`;
+    });
+    h+=`</table>`;
+  } else {
+    (ch.presented||[]).forEach((p,i)=>{
+      const tag=i===0?"Endzertifikat":i===1?"Zwischenzertifikat":(i===2?"Wurzel":"Glied "+i);
+      h+=`<div class="chainbox ${i===0?"leaf":""}">
+        <div class="c-head">${tag} ${p.self_signed?"<span class='dim'>(self-signed)</span>":""}</div>
+        <div class="c-sub">${esc(p.subject)}</div>
+        <div class="c-sub">Issuer: ${esc(p.issuer)} · Serial ${esc(p.serial)} · gültig bis ${esc(p.valid_to)}</div>
+      </div>`;
+    });
+  }
   const vsp=ch.verify_with_server_chain, vst=ch.verify_with_truststore;
   h+=`<table><tr><th>Verifikation</th><th>Ergebnis</th><th>Detail</th></tr>
     <tr><td>Nur Server-Kette</td>
@@ -511,12 +537,15 @@ $("host").addEventListener("keydown",e=>{if(e.key==="Enter")doCheck()});
 class Handler(BaseHTTPRequestHandler):
     server_version = "TLSWebCheck/1.0"
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8",
+              extra_headers=None):
         data = body.encode("utf-8") if isinstance(body, str) else body
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (extra_headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
 
@@ -539,7 +568,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"error": f"'{host}' sieht nicht wie "
                                                  "Hostname/IP(:Port) aus."}))
                 return
-            data, code = run_check(host, ocsp=ocsp, no_aia=no_aia, fast=fast)
+            # DoS-Schutz: max. MAX_CONCURRENT_CHECKS parallele Checks
+            if not _check_slots.acquire(blocking=False):
+                self._send(503, json.dumps(
+                    {"error": "Alle Prüf-Slots belegt – bitte in "
+                              "wenigen Sekunden erneut versuchen."}),
+                    extra_headers={"Retry-After": "5"})
+                return
+            try:
+                data, code = run_check(host, ocsp=ocsp, no_aia=no_aia,
+                                       fast=fast)
+            finally:
+                _check_slots.release()
             self._send(200 if code in (0, 1) else 502,
                        json.dumps(data, ensure_ascii=False))
         elif u.path == "/healthz":

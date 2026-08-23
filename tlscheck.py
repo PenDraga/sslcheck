@@ -248,11 +248,18 @@ def check_chain(pem_list, store, host, do_aia=True):
     # Truststore) werden als Gap-Objekte in res["missing"] erfasst; die
     # caIssuers-AIA-URL des jeweiligen Kindes steht in res["aia_urls"].
     res["aia_urls"] = []
+    res["full_chain"] = []
     cur = chain[0]
+    cur_source = "server"
     seen = set()
     while len(seen) < 12:
         m = cur.meta()
         seen.add(m["subject_norm"])
+        res["full_chain"].append({
+            "subject": m.get("subject"), "issuer": m.get("issuer"),
+            "serial": m.get("serial"), "valid_to": m.get("notAfter"),
+            "self_signed": m.get("self_signed"), "source": cur_source,
+        })
         # 1) Anker: aktuelles Glied ist eine vertraute Root (selbstsignierte
         #    Version im Truststore) → Kette abgeschlossen. Deckt auch
         #    Cross-Signaturen ab.
@@ -285,6 +292,7 @@ def check_chain(pem_list, store, host, do_aia=True):
         if nxt is not None and id(nxt) != id(cur) and \
            issuer_norm not in seen:
             cur = nxt
+            cur_source = "server"
             continue
         # 4) Issuer nicht vom Server → aus dem Truststore?
         found_pem = store.get(issuer_norm)
@@ -297,6 +305,11 @@ def check_chain(pem_list, store, host, do_aia=True):
             res["notes"].append(
                 f"Issuer '{m.get('issuer')}' weder vom Server geliefert noch "
                 f"im lokalen Truststore gefunden – Kettenglied fehlt.")
+            res["full_chain"].append({
+                "subject": m.get("issuer"), "issuer": None,
+                "serial": None, "valid_to": None,
+                "self_signed": None, "source": "missing",
+            })
             break
         found = Cert(found_pem, "truststore")
         fm = found.meta()
@@ -308,6 +321,11 @@ def check_chain(pem_list, store, host, do_aia=True):
                 "Kette endet bei einem Zertifikat, dessen Root im lokalen "
                 "Truststore liegt; die Root wird nicht vom Server geliefert "
                 "– der Client ergänzt sie aus seinem Truststore (üblich).")
+            res["full_chain"].append({
+                "subject": fm.get("subject"), "issuer": fm.get("issuer"),
+                "serial": fm.get("serial"), "valid_to": fm.get("notAfter"),
+                "self_signed": True, "source": "truststore",
+            })
             break
         # Echtes Zwischenglied fehlt am Server
         res["missing"].append(found)
@@ -316,6 +334,7 @@ def check_chain(pem_list, store, host, do_aia=True):
             f"Fehlt am Server: '{found.short}' (Serial {fm['serial']}) – "
             f"Client muss es aus dem Truststore oder per AIA laden.")
         cur = found
+        cur_source = "truststore"
 
     # Verifikation per openssl: (a) nur mit Server-Kette
     with tempfile.TemporaryDirectory() as td:
@@ -352,11 +371,25 @@ def check_chain(pem_list, store, host, do_aia=True):
                                 "– automatischer Abruf nicht möglich.")
                 res["aia"].append(info)
                 continue
+            if not _url_is_http(url):
+                info["note"] = (f"AIA-URL-Schema nicht erlaubt "
+                                f"(nur http/https): {url}")
+                res["aia"].append(info)
+                continue
             try:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "tlscheck/1.0"})
                 with urllib.request.urlopen(req, timeout=10) as r:
-                    data = r.read()
+                    data = b""
+                    while True:
+                        chunk = r.read(128 * 1024)
+                        if not chunk:
+                            break
+                        data += chunk
+                        if len(data) > AIA_MAX_BYTES:
+                            raise RuntimeError(
+                                f"AIA-Antwort zu groß (> "
+                                f"{AIA_MAX_BYTES // 1024} KB)")
                 pems = parse_pem(data.decode("utf-8", "replace"))
                 if pems:
                     fetched = Cert(pems[0], "aia")
@@ -595,9 +628,21 @@ CRL_MAX_BYTES = 20 * 1024 * 1024  # Default 20 MB; via --crl-max-mb änderbar
 CRL_MAX_MB = 20
 
 
+AIA_MAX_BYTES = 1 * 1024 * 1024  # 1 MB Deckel für AIA-Zertifikats-Abruf
+
+
+def _url_is_http(url):
+    """Nur http/https-URLs sind erlaubt (blockt file://, gopher://, ldap://
+    etc. aus feindlichen Zertifikaten)."""
+    return urlparse(url).scheme in ("http", "https")
+
+
 def _fetch_crl(url, timeout):
     """CRL-Download -> bytes (max. CRL_MAX_BYTES); wirft CrlFetchError
     mit menschenlesbarem Grund (404, HTML, zu groß, …)."""
+    if not _url_is_http(url):
+        raise CrlFetchError(
+            f"URL-Schema nicht erlaubt (nur http/https): {url}")
     req = urllib.request.Request(url,
                                  headers={"User-Agent": "tlscheck/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -870,7 +915,12 @@ def _one_http_request(ctx, host, port, path, timeout, host_header):
 
 
 def _follow_redirects(ctx, host, port, timeout, max_hops=3):
-    """HTTPS-Request mit Redirect-Following (https und http erlaubt)."""
+    """HTTPS-Request mit Redirect-Following (https und http erlaubt).
+    Sicherheit:
+    - Redirects auf Loopback/Link-Local (127.x, 169.254.x) NICHT folgen
+      (SSRF-Schutz).
+    - Downgrade HTTPS → HTTP NICHT folgen (Verschlüsselung erhalten)."""
+    started_secure = ctx is not None
     hops = []
     for _ in range(max_hops + 1):
         info = _one_http_request(ctx, host, port, "/", timeout,
@@ -884,12 +934,57 @@ def _follow_redirects(ctx, host, port, timeout, max_hops=3):
             p = urlparse(loc)
             if p.scheme not in ("http", "https"):
                 break
-            host = p.hostname or host
-            port = p.port or (443 if p.scheme == "https" else 80)
+            new_host = p.hostname or host
+            new_port = p.port or (443 if p.scheme == "https" else 80)
+            if p.scheme == "http" and started_secure:
+                hops.append({"status": "blocked",
+                             "server": None,
+                             "location": loc,
+                             "note": "Redirect auf unverschlüsseltes HTTP "
+                                     "nicht gefolgt."})
+                break
+            if _is_blocked_redirect_target(new_host):
+                hops.append({"status": "blocked",
+                             "server": None,
+                             "location": loc,
+                             "note": "Redirect auf internes Ziel "
+                                     "(Loopback/Link-Local) nicht gefolgt."})
+                break
+            host = new_host
+            port = new_port
             ctx = None if p.scheme == "http" else ctx
         else:
             break
     return hops, info, host, port
+
+
+def _is_blocked_redirect_target(hostname):
+    """True für Redirect-Ziele, die intern empfindlich sind:
+    Loopback (127.x, ::1, localhost) und Link-Local/Cloud-Metadata
+    (169.254.x, fe80::). Wird nur im Redirect-Following angewendet –
+    der primär geprüfte Host bleibt unbeschränkt."""
+    if hostname is None:
+        return False
+    h = hostname.lower().strip(".")
+    if h in ("localhost", "localhost.localdomain"):
+        return True
+    try:
+        import ipaddress
+        ip = ipaddress.ip_address(h)
+        return ip.is_loopback or ip.is_link_local
+    except ValueError:
+        # Hostname: per DNS auf IP prüfen (best effort, ohne Cache)
+        try:
+            import socket
+            infos = socket.getaddrinfo(h, None, socket.AF_UNSPEC,
+                                       socket.SOCK_STREAM)
+            for info in infos:
+                ip = ipaddress.ip_address(info[4][0])
+                if ip.is_loopback or ip.is_link_local:
+                    return True
+        except (socket.gaierror, OSError):
+            pass
+    return False
 
 
 def check_http(host, port, timeout=8):
@@ -1100,6 +1195,7 @@ def build_report(host, port, args, pem_list, proto, cert, chain, tls, ocsp,
                  "self_signed": c.meta()["self_signed"]}
                 for i, c in enumerate(chain["presented"])
             ],
+            "full_chain": chain.get("full_chain", []),
             "complete_from_server": chain["complete"],
             "root_presented_by_server": chain["root_presented"],
             "missing_from_server": [
