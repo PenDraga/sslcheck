@@ -171,6 +171,17 @@ th{color:var(--dim);font-size:10.5px;font-weight:700;text-transform:uppercase;le
   border-bottom:1px solid var(--line)}
 tr+tr td{border-top:1px solid var(--line)}
 td.name{font-family:var(--mono);word-break:break-all}
+
+/* CRL-Liste (mobiltauglich: Karten statt Tabellenspalten) */
+.crls{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.crlrow{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:baseline;
+  padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.crlrow .dot{grid-row:1/4;width:10px;height:10px;border-radius:50%;align-self:center}
+.crlrow .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.crlrow .dot.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+.crlrow .dot.na{background:var(--dim)}
+.crlrow .crl-url{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.crlrow .crl-meta{color:var(--dim);font-size:12px;word-break:break-word}
 .cat-S{color:var(--ok);font-weight:600}
 .cat-W{color:var(--warn);font-weight:600}
 .cat-X{color:var(--bad);font-weight:600}
@@ -186,9 +197,16 @@ td.name{font-family:var(--mono);word-break:break-all}
 @keyframes sp{to{transform:rotate(360deg)}}
 .foot{color:var(--dim);font-size:12px;text-align:center;margin-top:8px;opacity:.85}
 .hide{display:none}
-@media(max-width:600px){.kv{grid-template-columns:1fr}.kv dt{margin-top:4px}
+@media(max-width:600px){
+  .kv{grid-template-columns:1fr}.kv dt{margin-top:4px}
+  .wrap{padding:0 12px}
+  table{font-size:12px}
+  th,td{padding:7px 6px}
+  th{white-space:nowrap}
+  td{word-break:break-word}
   .gradebar{gap:12px}.badge{font-size:26px;width:56px;height:56px;border-radius:14px}
-  .row{align-items:stretch}.chk{justify-content:center}}
+  .row{align-items:stretch}.chk{justify-content:center}
+}
 </style>
 </head>
 <body>
@@ -420,12 +438,13 @@ function render(r){
       <dt>OCSP-Stapling</dt><dd>${st.stapled?`<span class="cat-S">✓ ${esc(st.status||"")}</span>`:'<span class="dim">nicht vorhanden</span>'}</dd>
       </dl>`;
     if(r.crl&&r.crl.crls&&r.crl.crls.length){
-      h+=`<table style="margin-top:8px"><tr><th>CRL (Issuer)</th><th>Abrufbar</th><th>Last Update</th><th>Notiz</th></tr>`+
-        r.crl.crls.map(c=>`<tr>
-          <td class="name">${esc(c.url||"")}<div class="dim">${esc(c.issuer||"")}</div></td>
-          <td class="${c.ok===true?"cat-S":c.ok===false?"cat-X":"dim"}">${c.ok===true?"✓":c.ok===false?"✗":"?"}</td>
-          <td class="dim">${esc(c.last_update||"")}</td>
-          <td class="dim">${esc(c.note||"")}</td></tr>`).join("")+`</table>`;
+      h+=`<div class="crls">`+r.crl.crls.map(c=>{
+        const cls=c.ok===true?"ok":c.ok===false?"bad":"na";
+        return `<div class="crlrow">
+          <span class="dot ${cls}" title="${c.ok===true?"Abrufbar":c.ok===false?"Nicht abrufbar":"unbekannt"}"></span>
+          <div class="crl-url">${esc(c.url||"")}</div>
+          <div class="crl-meta">${esc(c.issuer||"")}${c.last_update?` · Last Update ${esc(c.last_update)}`:""}${c.note?` · ${esc(c.note)}`:""}</div>
+        </div>`;}).join("")+`</div>`;
     }
     h+=`</div>`;
   }
