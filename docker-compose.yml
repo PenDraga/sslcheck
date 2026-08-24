@@ -5,13 +5,21 @@
 #   docker compose down         → stoppt
 #
 # Erreichbar über Traefik: https://<APP_DOMAIN>
-# (APP_DOMAIN = der Hostname/IP, unter der Traefik die UI ausliefern soll)
+#
+# Passwort-Schutz:
+#   In der .env (neben dieser Datei, wird NICHT committet) eintragen:
+#       TLS_CHECK_PASSWORD="geheim"          # klarer Text
+#   ODER gehasht (empfohlen):
+#       python3 tlscheck_web.py --make-hash  → Ausgabe als Wert eintragen
+#       TLS_CHECK_PASSWORD="hash:200000$..."
 
 services:
   tlscheck:
     image: ghcr.io/pendraga/sslcheck:latest
     container_name: tlscheck
     restart: unless-stopped
+    environment:
+      - TLS_CHECK_PASSWORD=${TLS_CHECK_PASSWORD}
     networks:
       - traefik
     labels:
@@ -20,8 +28,13 @@ services:
       traefik.http.routers.tlscheck.rule: "Host(`${APP_DOMAIN}`)"
       traefik.http.routers.tlscheck.entrypoints: "https"
       traefik.http.routers.tlscheck.tls: "true"
-      traefik.http.routers.tlscheck.tls.certresolver: "letsencrypt"
       traefik.http.services.tlscheck.loadbalancer.server.port: "8765"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     # Netzwerk-Zugriff braucht der Container (DNS + 443 + 80 + UDP/443 für
     # CRL/OCSP/HTTP3). Das externe Traefik-Netzwerk gibt Internetzugang.
 

@@ -6,6 +6,11 @@ Nur Python-Standardbibliothek. Start:
     python3 tlscheck_web.py                # Port 8765, 0.0.0.0
     python3 tlscheck_web.py --port 9000 --bind 127.0.0.1
 
+Passwort-Schutz (optional):
+    TLS_CHECK_PASSWORD="meinpasswort" python3 tlscheck_web.py
+    (alternativ gehasht: TLS_CHECK_PASSWORD="hash:ITER$salt$dk" – Hash erzeugen
+     mit: python3 tlscheck_web.py --make-hash)
+
 Die eigentliche Prüfung läuft serverseitig als Subprozess:
     python3 tlscheck.py <host> --json
 Damit bleibt jede Anfrage isoliert (keine Global-State-Probleme bei
@@ -13,11 +18,16 @@ mehreren parallelen Checks) und der Truststore-Build pro Check ist klein.
 """
 
 import argparse
+import hashlib
+import hmac
 import json
+import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
@@ -29,6 +39,104 @@ PY = sys.executable or "python3"
 # Max. parallele Checks (Subprocess-Budget) – davor: 503.
 MAX_CONCURRENT_CHECKS = 5
 _check_slots = threading.Semaphore(MAX_CONCURRENT_CHECKS)
+
+# --- Passwort-Auth (optional, via ENV) -------------------------------------
+# TLS_CHECK_PASSWORD gesetzt  → Login erforderlich (HTTP Basic / Cookie-Session).
+# TLS_CHECK_SECRET optional → Session-Cookie-Signatur (Default: zufällig pro
+#   Start; Sessions enden beim Neustart).
+AUTH_ENABLED = bool(os.environ.get("TLS_CHECK_PASSWORD"))
+_SESSION_SECRET = os.environ.get("TLS_CHECK_SECRET") or secrets.token_hex(32)
+_SESSION_TTL = 12 * 3600          # 12 h gültig
+_LOGIN_MAX_ATTEMPTS = 10         # dann 5 min Sperre
+_login_failures = 0
+_login_locked_until = 0.0
+_login_lock = threading.Lock()
+
+PBKDF2_ITER = 200_000
+
+
+def _password_hash(password):
+    """PBKDF2-HMAC-SHA256 (iter, salt hex, hash hex)."""
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt,
+                             PBKDF2_ITER)
+    return f"{PBKDF2_ITER}${salt.hex()}${dk.hex()}"
+
+
+def _password_ok(password):
+    """Prüft Passwort gegen ENV-TLS_CHECK_PASSWORD (plain oder hash-Format)."""
+    ref = os.environ["TLS_CHECK_PASSWORD"]
+    if ref.startswith(("plain:", "hash:")):
+        kind, ref = ref.split(":", 1)
+    else:
+        kind = "plain"
+    pw = password.encode("utf-8")
+    if kind == "plain":
+        return hmac.compare_digest(ref.encode("utf-8"), pw)
+    try:
+        iters_s, salt_s, dk_s = ref.split("$", 2)
+        iters, salt, dk = int(iters_s), bytes.fromhex(salt_s), bytes.fromhex(dk_s)
+    except (ValueError, TypeError):
+        return False
+    calc = hashlib.pbkdf2_hmac("sha256", pw, salt, iters)
+    return hmac.compare_digest(calc, dk)
+
+
+def _issue_session_cookie():
+    """Erstellt Signed+HMAC Session-Cookie-Wert (token|ttl|hmac)."""
+    token = secrets.token_hex(32)
+    exp = int(time.time()) + _SESSION_TTL
+    sig = hmac.new(_SESSION_SECRET.encode("utf-8"),
+                   f"{token}|{exp}".encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{token}|{exp}|{sig}"
+
+
+def _session_cookie_ok(cookie_value):
+    try:
+        token, exp_s, sig = cookie_value.split("|", 2)
+        exp = int(exp_s)
+    except (ValueError, TypeError):
+        return False
+    expect = hmac.new(_SESSION_SECRET.encode("utf-8"),
+                      f"{token}|{exp}".encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expect) or exp < time.time():
+        return False
+    return True
+
+
+def _login_allowed():
+    """Rate-Limit: nach N Fehlversuchen 5 min Sperre."""
+    global _login_failures, _login_locked_until
+    with _login_lock:
+        if _login_locked_until and time.time() < _login_locked_until:
+            return False
+        if _login_failures >= _LOGIN_MAX_ATTEMPTS:
+            _login_locked_until = time.time() + 300
+            _login_failures = 0
+            return False
+        return True
+
+
+def _login_note_success():
+    global _login_failures, _login_locked_until
+    with _login_lock:
+        _login_failures = 0
+        _login_locked_until = 0.0
+
+
+def _login_note_failure():
+    global _login_failures
+    with _login_lock:
+        _login_failures += 1
+
+
+def _cookie_named(name, raw):
+    """Sucht einen Cookie-Wert im raw-Cookie-Header (None falls nicht da)."""
+    for part in (raw or "").split(";"):
+        part = part.strip()
+        if part.startswith(name + "="):
+            return part[len(name) + 1:]
+    return None
 
 # Host muss wie ein Hostname / IP (optional mit :Port) aussehen.
 HOST_RE = re.compile(
@@ -546,11 +654,57 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra_headers or {}).items():
             self.send_header(k, v)
+        self._maybe_attach_session_cookie()
         self.end_headers()
         self.wfile.write(data)
 
+    def _authorized(self):
+        """Cookie-Session oder HTTP Basic (Basic gibt Session-Cookie zurück)."""
+        if not AUTH_ENABLED:
+            return True
+        raw = self.headers.get("Cookie", "")
+        val = _cookie_named("tlscheck", raw)
+        if val and _session_cookie_ok(val):
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth.lower().startswith("basic ") and AUTH_ENABLED:
+            import base64
+            try:
+                user, _, pw = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
+            except Exception:
+                user, pw = "", ""
+            if _login_allowed() and _password_ok(pw):
+                _login_note_success()
+                self._auth_pending_cookie = _issue_session_cookie()
+                return True
+            _login_note_failure()
+        return False
+
+    def _require_auth(self):
+        """401 + WWW-Authenticate, falls Auth aktiv und nicht authorisiert."""
+        if self._authorized():
+            return True
+        self._send(401, json.dumps({"error": "Login erforderlich."}),
+                   extra_headers={
+                       "WWW-Authenticate": 'Basic realm="TLS-Check", charset="UTF-8"'})
+        return False
+
+    def _maybe_attach_session_cookie(self):
+        """Cookie setzen, wenn gerade per Basic authifiziert wurde."""
+        ck = getattr(self, "_auth_pending_cookie", None)
+        if ck:
+            self.send_header("Set-Cookie",
+                             f"tlscheck={ck}; Path=/; HttpOnly; "
+                             "SameSite=Lax; Max-Age=43200")
+            self._auth_pending_cookie = None
+
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/healthz":
+            self._send(200, json.dumps({"ok": True}))
+            return
+        if not self._require_auth():
+            return
         if u.path in ("/", "/index.html"):
             self._send(200, INDEX_HTML, "text/html; charset=utf-8")
         elif u.path == "/api/check":
@@ -582,8 +736,6 @@ class Handler(BaseHTTPRequestHandler):
                 _check_slots.release()
             self._send(200 if code in (0, 1) else 502,
                        json.dumps(data, ensure_ascii=False))
-        elif u.path == "/healthz":
-            self._send(200, json.dumps({"ok": True}))
         else:
             self._send(404, json.dumps({"error": "nicht gefunden"}))
 
@@ -596,10 +748,21 @@ def main():
     ap = argparse.ArgumentParser(description="TLS-Web-Check (LAN)")
     ap.add_argument("--bind", default="0.0.0.0", help="Bind-Adresse (Default 0.0.0.0)")
     ap.add_argument("--port", type=int, default=8765, help="Port (Default 8765)")
+    ap.add_argument("--make-hash", action="store_true",
+                    help="Passwort (interaktiv) zu hash:ITER$salt$dk hashen und beenden")
     args = ap.parse_args()
+    if args.make_hash:
+        import getpass
+        pw = getpass.getpass("Passwort für TLS_CHECK_PASSWORD (Eingabe unsichtbar): ")
+        print("hash:" + _password_hash(pw))
+        print("(Als TLS_CHECK_PASSWORD setzen, z. B. in docker-compose.yml)")
+        return
     httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     print(f"TLS-Web-Check läuft: http://{args.bind}:{args.port} "
           f"(Checker: {CHECKER})")
+    if AUTH_ENABLED:
+        print("⚠ Passwort-Schutz AKTIV (TLS_CHECK_PASSWORD gesetzt) – "
+              "Browser wird per HTTP-Basic/Session-Cookie abfragen.")
     print("Strg+C zum Beenden.")
     try:
         httpd.serve_forever()
