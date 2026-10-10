@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin">
+<title>TLS-Check</title>
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-title-key="app.title" data-block-private="{{BLOCK}}">
+{{HEADER}}
+<div class="wrap">
+  <div class="card hero fade">
+    <h2 class="title"><span data-i18n="hero.t1"></span><span class="grad" data-i18n="hero.t2"></span></h2>
+    <p class="lead" data-i18n="hero.lead"></p>
+    <form id="form" class="inrow" autocomplete="off">
+      <div class="inbox">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.6 2.8 3.8 6 3.8 9.5s-1.2 6.7-3.8 9.5c-2.6-2.8-3.8-6-3.8-9.5S9.4 5.3 12 2.5z"/></svg>
+        <input type="text" id="host" spellcheck="false" autocapitalize="off" data-i18n-ph="host.ph">
+      </div>
+      <button class="btn" id="go" type="submit">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5L4.5 13.5H12l-1 8 8.5-11H12z"/></svg>
+        <span data-i18n="btn.check"></span>
+      </button>
+    </form>
+    <div class="opts">
+      <label class="opt"><input type="checkbox" id="ocsp"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span><span data-i18n="opt.ocsp"></span></label>
+      <label class="opt"><input type="checkbox" id="noaia"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span><span data-i18n="opt.noaia"></span></label>
+      <label class="opt" data-i18n-title="opt.fast.t"><input type="checkbox" id="fast"><span class="box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span><span data-i18n="opt.fast"></span></label>
+    </div>
+    <div class="policy" id="policy">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3.2v6c0 5-3.4 8.7-8 10.3-4.6-1.6-8-5.3-8-10.3v-6z"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></svg>
+      <span id="policytxt"></span>
+    </div>
+  </div>
+
+  <div id="progress" class="card progress hide">
+    <div class="ptop"><span class="ptitle"><span data-i18n="prog.title"></span> · <span id="phost" class="mono"></span></span><span class="ptime" id="ptime">0.0 s</span></div>
+    <div class="pbar"><i id="pfill"></i></div>
+    <ul class="steps" id="steps"></ul>
+  </div>
+
+  <div id="result"></div>
+  <div class="foot" data-i18n="foot"></div>
+</div>
+<script src="/assets/common.js"></script>
+<script src="/assets/app.js"></script>
+</body>
+</html>

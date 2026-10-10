@@ -4,7 +4,8 @@
 # Run:    docker run -d --name tlscheck --restart unless-stopped \
 #              -p 8765:8765 tlscheck
 #
-# Im Container: Web-Frontend auf http://<host>:8765
+# Im Container: Web-Frontend auf http://<host>:8765 (Login unter /login,
+#               wenn TLS_CHECK_PASSWORD gesetzt ist)
 #               API:       http://<host>:8765/api/check?host=example.com&ocsp=1
 #               CLI:       docker run --rm tlscheck tlscheck.py example.com
 
@@ -17,6 +18,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY tlscheck.py tlscheck_web.py /app/
+COPY static /app/static
 
 # Ohne Root: Port 8765 > 1024, CA-Bundle ist world-readable
 RUN useradd -m -u 10001 tlscheck \
