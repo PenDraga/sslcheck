@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
     environment:
       - TLS_CHECK_PASSWORD=${TLS_CHECK_PASSWORD}
+      - TLS_CHECK_TRUST_PROXY=1   # Client-IP für Login-Sperre aus X-Real-IP (Traefik)
     networks:
       - traefik
     labels:

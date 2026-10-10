@@ -91,6 +91,12 @@ Stand: 2026-08-23 (Security-Audit, alle Fixes drin):
 - **Größen-Deckel**: CRL-Downloads max. 20 MB
   (`--crl-max-mb`), AIA-Antworten max. 1 MB – Memory-Exhaustion
   durch feindliche Endpunkte begrenzt.
+- **Login-Sperre pro Client-IP**: nach 10 Fehlversuchen 5 min Sperre –
+  nur für diese IP, andere Nutzer können sich weiter anmelden.
+  Hinter einem Reverse Proxy (nginx/Traefik) `TLS_CHECK_TRUST_PROXY=1`
+  setzen, damit die echte IP aus `X-Real-IP` kommt. **Nur** setzen, wenn
+  der Container ausschließlich über den Proxy erreichbar ist – sonst ist
+  der Header fälschbar.
 - **DoS-Schutz (Web)**: max. 5 parallele Checks
   (`threading.Semaphore`), darüber → HTTP 503 + `Retry-After`.
 - **Temp-Dateien**: `NamedTemporaryFile(delete=False)` +

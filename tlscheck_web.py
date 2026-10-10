@@ -47,10 +47,14 @@ _check_slots = threading.Semaphore(MAX_CONCURRENT_CHECKS)
 AUTH_ENABLED = bool(os.environ.get("TLS_CHECK_PASSWORD"))
 _SESSION_SECRET = os.environ.get("TLS_CHECK_SECRET") or secrets.token_hex(32)
 _SESSION_TTL = 12 * 3600          # 12 h gültig
-_LOGIN_MAX_ATTEMPTS = 10         # dann 5 min Sperre
-_login_failures = 0
-_login_locked_until = 0.0
+_LOGIN_MAX_ATTEMPTS = 10         # pro Client-IP, dann 5 min Sperre
+_LOGIN_LOCK_SECONDS = 300
+_LOGIN_MAX_TRACKED = 10_000      # Speicher-Deckel für die IP-Tabelle
+_login_state = {}                # ip -> [fehlversuche, gesperrt_bis]
 _login_lock = threading.Lock()
+# TLS_CHECK_TRUST_PROXY=1 → Client-IP aus X-Real-IP (nur hinter einem Reverse
+#   Proxy setzen, der den Header selbst überschreibt – sonst fälschbar).
+TRUST_PROXY = os.environ.get("TLS_CHECK_TRUST_PROXY", "") in ("1", "true")
 
 PBKDF2_ITER = 200_000
 
@@ -104,30 +108,39 @@ def _session_cookie_ok(cookie_value):
     return True
 
 
-def _login_allowed():
-    """Rate-Limit: nach N Fehlversuchen 5 min Sperre."""
-    global _login_failures, _login_locked_until
+def _login_prune(now):
+    """Abgelaufene Sperren entfernen; bei Überlauf älteste Einträge verwerfen."""
+    for ip in [ip for ip, (_, until) in _login_state.items()
+               if until and until <= now]:
+        del _login_state[ip]
+    while len(_login_state) >= _LOGIN_MAX_TRACKED:
+        del _login_state[next(iter(_login_state))]
+
+
+def _login_allowed(ip):
+    """Rate-Limit pro IP: nach N Fehlversuchen 5 min Sperre."""
     with _login_lock:
-        if _login_locked_until and time.time() < _login_locked_until:
-            return False
-        if _login_failures >= _LOGIN_MAX_ATTEMPTS:
-            _login_locked_until = time.time() + 300
-            _login_failures = 0
-            return False
-        return True
+        st = _login_state.get(ip)
+        return not (st and st[1] and time.time() < st[1])
 
 
-def _login_note_success():
-    global _login_failures, _login_locked_until
+def _login_note_success(ip):
     with _login_lock:
-        _login_failures = 0
-        _login_locked_until = 0.0
+        _login_state.pop(ip, None)
 
 
-def _login_note_failure():
-    global _login_failures
+def _login_note_failure(ip):
     with _login_lock:
-        _login_failures += 1
+        now = time.time()
+        st = _login_state.get(ip)
+        if st is None:
+            _login_prune(now)
+            st = _login_state[ip] = [0, 0.0]
+        elif st[1] and st[1] <= now:     # Sperre abgelaufen → neu zählen
+            st[:] = [0, 0.0]
+        st[0] += 1
+        if st[0] >= _LOGIN_MAX_ATTEMPTS:
+            st[1] = now + _LOGIN_LOCK_SECONDS
 
 
 def _cookie_named(name, raw):
@@ -673,12 +686,22 @@ class Handler(BaseHTTPRequestHandler):
                 user, _, pw = base64.b64decode(auth[6:]).decode("utf-8").partition(":")
             except Exception:
                 user, pw = "", ""
-            if _login_allowed() and _password_ok(pw):
-                _login_note_success()
+            ip = self._client_ip()
+            if not _login_allowed(ip):
+                return False
+            if _password_ok(pw):
+                _login_note_success(ip)
                 self._auth_pending_cookie = _issue_session_cookie()
                 return True
-            _login_note_failure()
+            _login_note_failure(ip)
         return False
+
+    def _client_ip(self):
+        if TRUST_PROXY:
+            real = self.headers.get("X-Real-IP", "").strip()
+            if real:
+                return real
+        return self.client_address[0]
 
     def _require_auth(self):
         """401 + WWW-Authenticate, falls Auth aktiv und nicht authorisiert."""
