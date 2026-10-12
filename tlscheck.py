@@ -73,6 +73,21 @@ def parse_pem(text):
                         text, re.S)
     return [b + "\n" for b in blocks]
 
+def certs_from_bytes(data):
+    """PEM-Zertifikate aus AIA-Antwort: PEM, DER (.crt/.cer) oder PKCS#7 (.p7c)."""
+    if b"-----BEGIN CERTIFICATE-----" in data:
+        return parse_pem(data.decode("utf-8", "replace"))
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "aia.bin")
+        Path(path).write_bytes(data)
+        for args in (["x509", "-inform", "DER", "-in", path],
+                     ["pkcs7", "-inform", "DER", "-print_certs", "-in", path]):
+            rc, out, _ = run_cmd([OSSL, *args])
+            pems = parse_pem(out) if rc == 0 else []
+            if pems:
+                return pems
+    return []
+
 def norm_name(s):
     """Zertifikatsnamen normalisieren für Vergleich (keine Leerzeichen, case-insensitiv)."""
     return re.sub(r"\s+", "", s.upper().strip())
@@ -366,7 +381,8 @@ def check_chain(pem_list, store, host, do_aia=True):
     res = {"presented": [], "complete": False, "root_presented": False,
            "missing": [], "notes": [],
            "verify_with_presentation": None,
-           "verify_store_only": None, "aia": []}
+           "verify_store_only": None, "verify_with_aia": None,
+           "aia": [], "aia_certs": []}
     chain = [Cert(p, f"server[{i}]") for i, p in enumerate(pem_list)]
     res["presented"] = chain
 
@@ -536,7 +552,7 @@ def check_chain(pem_list, store, host, do_aia=True):
                 continue
             try:
                 data, _ = _fetch_limited(url, AIA_MAX_BYTES, 10)
-                pems = parse_pem(data.decode("utf-8", "replace"))
+                pems = certs_from_bytes(data)
                 if pems:
                     fetched = Cert(pems[0], "aia")
                     fm = fetched.meta()
@@ -547,6 +563,17 @@ def check_chain(pem_list, store, host, do_aia=True):
                         if norm_name(subject) in fm["subject_norm"] or \
                            fm["subject_norm"] in norm_name(subject):
                             info["reachable"] = True
+                            res["aia_certs"].append(pems[0])
+                            for fc in res["full_chain"]:
+                                if fc["source"] == "missing" and \
+                                   fc["subject"] == subject:
+                                    fc.update({
+                                        "subject": fm.get("subject"),
+                                        "issuer": fm.get("issuer"),
+                                        "serial": fm.get("serial"),
+                                        "valid_to": fm.get("notAfter"),
+                                        "self_signed": fm.get("self_signed"),
+                                        "source": "aia"})
                             info["note"] = L("Zertifikat abrufbar (Subject "
                                              "stimmt überein).",
                                              "Certificate retrievable "
@@ -571,11 +598,24 @@ def check_chain(pem_list, store, host, do_aia=True):
                             info["note"] = L("Liefert anderes Zertifikat.",
                                              "Returns a different certificate.")
                 else:
-                    info["note"] = L("Kein PEM-Zertifikat in der Antwort.",
-                                     "No PEM certificate in the response.")
+                    info["note"] = L("Kein Zertifikat in der Antwort.",
+                                     "No certificate in the response.")
             except Exception as e:
                 info["note"] = L("Abruf fehlgeschlagen: ", "Retrieval failed: ") + str(e)
             res["aia"].append(info)
+
+    # Verifikation wie ein Browser: Server-Kette + per AIA geladene Glieder
+    if res["aia_certs"]:
+        with tempfile.TemporaryDirectory() as td:
+            leaf_path = os.path.join(td, "leaf.pem")
+            untr_path = os.path.join(td, "untrusted.pem")
+            Path(leaf_path).write_text(pem_list[0])
+            Path(untr_path).write_text("".join(pem_list[1:]) +
+                                       "".join(res["aia_certs"]))
+            rc, out, err = run_cmd([OSSL, "verify", "-CAfile", CA_BUNDLE,
+                                    "-untrusted", untr_path, leaf_path])
+            detail = ((out or err).strip().splitlines() or [""])[-1]
+            res["verify_with_aia"] = {"ok": rc == 0, "detail": detail}
     return res
 
 # ---------------------------------------------------------------- Hostname
@@ -1496,14 +1536,27 @@ def build_report(host, port, args, pem_list, proto, cert, chain, tls, ocsp,
     if "SHA1" in m.get("sig_alg", "").upper():
         problems.append(L("Signatur mit SHA-1 (nicht mehr akzeptiert).",
                           "SHA-1 signature (no longer accepted)."))
-    if chain["missing"]:
+    aia_ok = bool((chain.get("verify_with_aia") or {}).get("ok"))
+    if chain["missing"] and not \
+       (aia_ok and not chain["verify_with_presentation"]["ok"]):
         warnings.append(L(f"{len(chain['missing'])} Zwischenzertifikat/-e "
                           f"werden nicht vom Server geliefert "
                           f"(Client-Truststore/AIA nötig).",
                           f"{len(chain['missing'])} intermediate certificate(s) "
                           f"not sent by the server "
                           f"(client truststore/AIA needed)."))
-    if not chain["verify_with_presentation"]["ok"]:
+    if not chain["verify_with_presentation"]["ok"] and aia_ok:
+        warnings.append(L("Kette unvollständig: Der Server liefert das "
+                          "Zwischenzertifikat nicht mit. Browser laden es per "
+                          "AIA nach, andere Clients (curl, Java, Apps, "
+                          "Mailserver) scheitern – Zwischenzertifikat am "
+                          "Server mitkonfigurieren.",
+                          "Chain incomplete: the server does not send the "
+                          "intermediate certificate. Browsers fetch it via "
+                          "AIA, other clients (curl, Java, apps, mail "
+                          "servers) fail – configure the intermediate on the "
+                          "server."))
+    elif not chain["verify_with_presentation"]["ok"]:
         problems.append(L("Kette mit den Server-Zertifikaten nicht "
                           "verifizierbar: ",
                           "Chain not verifiable with the server "
@@ -1544,7 +1597,8 @@ def build_report(host, port, args, pem_list, proto, cert, chain, tls, ocsp,
 
     # Punkte wie SSL Labs; die Note ist das Schlechtere aus Regel-Note
     # und Punkte-Note, A+ zusätzlich nur mit langem HSTS und ohne Befund.
-    cert_valid = cert_ok and host_ok and chain["verify_with_presentation"]["ok"] \
+    cert_valid = cert_ok and host_ok and \
+        (chain["verify_with_presentation"]["ok"] or aia_ok) \
         and not (rev and rev.get("level") == "revoked")
     scores = compute_scores(cert_valid, tls, kx or {"groups": []})
     sg = _score_grade(scores["overall"])
@@ -1606,6 +1660,7 @@ def build_report(host, port, args, pem_list, proto, cert, chain, tls, ocsp,
                 for c in chain["missing"]],
             "verify_with_server_chain": chain["verify_with_presentation"],
             "verify_with_truststore": chain["verify_store_only"],
+            "verify_with_aia": chain.get("verify_with_aia"),
             "notes": chain["notes"],
             "aia": chain["aia"],
         },
@@ -1700,6 +1755,12 @@ def print_report(r, args):
           f"{L('openssl-verify nur mit Server-Kette', 'openssl verify with server chain only')}: "
           f"{L('erfolgreich', 'successful') if vsp['ok'] else L('FEHLGESCHLAGEN', 'FAILED')}"
           f"  ({vsp['detail']})")
+    va = ch.get("verify_with_aia")
+    if va:
+        print(f"    {mark(va['ok'])} "
+              f"{L('openssl-verify mit AIA-Nachladen (wie Browser)', 'openssl verify with AIA fetching (like browsers)')}: "
+              f"{L('erfolgreich', 'successful') if va['ok'] else L('FEHLGESCHLAGEN', 'FAILED')}"
+              f"  ({va['detail']})")
     if ch["missing_from_server"]:
         print(f"    {mark(False)} "
               f"{L('Fehlt am Server (Client muss beschaffen)', 'Missing on server (client must obtain)')}:")

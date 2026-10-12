@@ -210,6 +210,7 @@ details.sec .body{padding:0 22px 22px}
 .cnode::before{content:"";position:absolute;left:17px;top:15px;width:12px;height:12px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 20%,transparent)}
 .cnode.ts::before{background:var(--info);box-shadow:0 0 0 4px var(--info-soft)}
 .cnode.miss::before{background:var(--bad);box-shadow:0 0 0 4px var(--bad-soft)}
+.cnode.aia::before{background:var(--warn);box-shadow:0 0 0 4px var(--warn-soft)}
 .cnode:not(:last-child)::after{content:"";position:absolute;left:22px;top:31px;bottom:-11px;width:2px;background:var(--line)}
 .cnode .ch{font-weight:700;font-size:13.5px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .cnode .cs{color:var(--dim);font-size:12px;font-family:var(--mono);word-break:break-all;margin-top:2px}

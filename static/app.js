@@ -219,23 +219,26 @@ function render() {
   // --- Kette
   const vsp = ch.verify_with_server_chain || {}, vst = ch.verify_with_truststore || {};
   const missing = ch.missing_from_server || [];
-  const chainSt = !vsp.ok ? "bad" : missing.length ? "warn" : "ok";
+  const vaia = ch.verify_with_aia;
+  const chainSt = !vsp.ok && !(vaia && vaia.ok) ? "bad" : missing.length ? "warn" : "ok";
   const srcTag = src => src === "server" ? `<span class="tag ok">${esc(t("src.server"))}</span>`
     : src === "truststore" ? `<span class="tag i">${esc(t("src.ts"))}</span>`
+    : src === "aia" ? `<span class="tag w">${esc(t("src.aia"))}</span>`
     : `<span class="tag p">${esc(t("src.miss"))}</span>`;
   let cb = `<div class="chain">`;
   const fc = ch.full_chain && ch.full_chain.length ? ch.full_chain
     : (ch.presented || []).map(p => ({ ...p, source: "server" }));
   fc.forEach((p, i) => {
     const role = i === 0 ? t("c.leaf") : (p.self_signed ? t("c.root") : t("c.inter"));
-    const cls = p.source === "server" ? "" : p.source === "truststore" ? " ts" : " miss";
+    const cls = p.source === "server" ? "" : p.source === "truststore" ? " ts" : p.source === "aia" ? " aia" : " miss";
     cb += `<div class="cnode${cls}"><div class="ch">${esc(role)} ${srcTag(p.source)}</div>
       <div class="cs">${esc(p.subject)}</div>
       ${p.valid_to ? `<div class="cs">${esc(t("c.until"))} ${esc(p.valid_to)}</div>` : ""}</div>`;
   });
   cb += `</div><table><tr><th>${esc(t("v.title"))}</th><th></th><th>Detail</th></tr>
     <tr><td>${esc(t("v.server"))}</td><td>${okTxt(vsp.ok, t("v.ok"), t("v.fail"))}</td><td class="dim mono">${esc(vsp.detail)}</td></tr>
-    <tr><td>${esc(t("v.ts"))}</td><td>${okTxt(vst.ok, t("v.ok"), t("v.fail"))}</td><td class="dim mono">${esc(vst.detail)}</td></tr></table>`;
+    <tr><td>${esc(t("v.ts"))}</td><td>${okTxt(vst.ok, t("v.ok"), t("v.fail"))}</td><td class="dim mono">${esc(vst.detail)}</td></tr>${vaia ? `
+    <tr><td>${esc(t("v.aia"))}</td><td>${okTxt(vaia.ok, t("v.ok"), t("v.fail"))}</td><td class="dim mono">${esc(vaia.detail)}</td></tr>` : ""}</table>`;
   if (missing.length) {
     cb += `<div class="note">${ICON.alert}<span>${esc(t("c.missing"))}</span></div><ul class="find">` +
       missing.map(m => `<li class="w">${ICON.alert}<span><span class="tag ${m.in_truststore ? "i" : "p"}">${esc(t(m.in_truststore ? "c.in_ts" : "c.not_local"))}</span> ${esc(m.subject)}</span></li>`).join("") + `</ul>`;
