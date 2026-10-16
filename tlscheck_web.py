@@ -185,8 +185,10 @@ HOST_RE = re.compile(
 )
 
 
-def run_check(hostport, lang, timeout=120, ocsp=False, no_aia=False, fast=False):
-    """tlscheck.py als Subprozess ausführen -> (json-obj|dict, exitcode)."""
+def run_check(hostport, lang, timeout=None, ocsp=False, no_aia=False, fast=False):
+    """tlscheck.py als Subprozess ausführen -> (json-obj|dict, exitcode).
+    timeout = Timeout pro Verbindung (None = Default des Checkers, 6 s);
+    die Gesamtdauer begrenzt subprocess.run (180 s)."""
     cmd = [PY, str(CHECKER), hostport, "--json", "--lang", lang]
     if timeout:
         cmd += ["--timeout", str(timeout)]

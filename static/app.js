@@ -82,6 +82,13 @@ async function doCheck(ev) {
       setTimeout(() => { location.href = "/login?e=expired"; }, 1500);
       return;
     }
+    const ct = res.headers.get("Content-Type") || "";
+    if (!ct.includes("application/json")) {
+      lastResult = null;
+      $("result").innerHTML = errorCard(t("err.net"),
+        res.status === 504 ? t("err.gateway") : `HTTP ${res.status}`, false);
+      return;
+    }
     lastResult = await res.json();
     lastDuration = (performance.now() - t0) / 1000;
     render();

@@ -161,6 +161,7 @@ const I18N = {
     "err.title": "Prüfung fehlgeschlagen",
     "err.blocked": "Ziel gesperrt",
     "err.net": "Abfrage fehlgeschlagen",
+    "err.gateway": "Zeitüberschreitung am Proxy – das Ziel antwortet zu langsam oder gar nicht.",
     "err.session": "Sitzung abgelaufen – du wirst zur Anmeldung weitergeleitet …",
     "foot": "Bewertung angelehnt an den SSL-Labs-Rating-Guide · Datenquelle: tlscheck.py --json",
     "langhint": "Sprache gewechselt – Prüf-Meldungen erscheinen ab der nächsten Prüfung in der neuen Sprache."
@@ -324,6 +325,7 @@ const I18N = {
     "err.title": "Check failed",
     "err.blocked": "Target blocked",
     "err.net": "Request failed",
+    "err.gateway": "Proxy timeout – the target responds too slowly or not at all.",
     "err.session": "Session expired – redirecting to sign in …",
     "foot": "Rating based on the SSL Labs rating guide · data source: tlscheck.py --json",
     "langhint": "Language changed – check messages will appear in the new language from the next check on."
